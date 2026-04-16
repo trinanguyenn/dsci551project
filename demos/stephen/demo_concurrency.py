@@ -58,8 +58,9 @@ What this shows:
         conn.autocommit = False
         cur = conn.cursor()
         try:
-            # Begin transaction - PostgreSQL takes a snapshot here
-            cur.execute("BEGIN")
+            # Use REPEATABLE READ so PostgreSQL takes a snapshot at BEGIN
+            # and holds it for the entire transaction -- this is MVCC in action
+            cur.execute("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             cur.execute("SELECT COUNT(*) FROM papers WHERE year = 2021")
             count_before = cur.fetchone()[0]
             results["a_before"] = count_before
@@ -117,11 +118,15 @@ What this shows:
     thread_a.join()
     thread_b.join()
 
+    a_before = results.get('a_before')
+    a_after = results.get('a_after')
+    snapshot_held = a_before == a_after
+
     print(f"""
   Result:
-    Transaction A saw {results.get('a_before')} papers before B's insert.
-    Transaction A saw {results.get('a_after')} papers after B's insert.
-    --> A's count did not change because MVCC gave it a consistent snapshot.
+    Transaction A saw {a_before} papers before B's insert.
+    Transaction A saw {a_after} papers after B's insert.
+    --> {'A did NOT see Bs insert -- MVCC snapshot held. This is correct MVCC behavior.' if snapshot_held else 'WARNING: A saw Bs insert -- snapshot not held as expected.'}
     --> B committed without waiting for A to finish.
     --> No locking. No blocking. This is MVCC.
 """)
