@@ -4,27 +4,36 @@ DSCI 551 Group Project - Spring 2026
 Focus Area: Concurrency and Recovery (Stephen Rosario)
 
 This script demonstrates PostgreSQL's Multi-Version Concurrency Control (MVCC)
-using the research_papers database. It simulates two concurrent transactions
-and shows how PostgreSQL handles simultaneous reads and writes without blocking.
+using the research_papers database. It runs four demos:
+  1. MVCC - concurrent reads and writes do not block each other
+  2. Isolation levels - Read Committed vs Repeatable Read
+  3. Dead tuples and VACUUM - the cost of MVCC and how Postgres manages it
+  4. Transaction atomicity - all-or-nothing behavior on error
 
 Usage:
-    py demo_concurrency.py
+    python demo_concurrency.py
 
 Requirements:
-    py -m pip install psycopg2-binary
+    pip install psycopg2-binary
+
+Connection settings are read from environment variables (PGHOST, PGPORT,
+PGDATABASE, PGUSER, PGPASSWORD), falling back to localhost defaults. This
+lets the same code run on Windows and WSL without edits.
 """
 
-import psycopg2
+import os
 import threading
 import time
 
+import psycopg2
+
 # ─── Database connection settings ────────────────────────────────────────────
 DB_CONFIG = {
-    "host":     "localhost",
-    "port":     5432,
-    "dbname":   "research_papers",
-    "user":     "postgres",
-    "password": "postgres"   # Change if your password is different
+    "host":     os.environ.get("PGHOST", "localhost"),
+    "port":     int(os.environ.get("PGPORT", 5432)),
+    "dbname":   os.environ.get("PGDATABASE", "research_papers"),
+    "user":     os.environ.get("PGUSER", "postgres"),
+    "password": os.environ.get("PGPASSWORD", "postgres"),
 }
 
 DIVIDER = "=" * 65
@@ -126,7 +135,7 @@ What this shows:
   Result:
     Transaction A saw {a_before} papers before B's insert.
     Transaction A saw {a_after} papers after B's insert.
-    --> {'A did NOT see Bs insert -- MVCC snapshot held. This is correct MVCC behavior.' if snapshot_held else 'WARNING: A saw Bs insert -- snapshot not held as expected.'}
+    --> {"A did NOT see B's insert -- MVCC snapshot held. This is correct MVCC behavior." if snapshot_held else "WARNING: A saw B's insert -- snapshot not held as expected."}
     --> B committed without waiting for A to finish.
     --> No locking. No blocking. This is MVCC.
 """)
@@ -270,7 +279,6 @@ What this shows:
     """)
 
     # Force stats collection
-    cur.execute("SELECT pg_stat_reset()")
     time.sleep(1)
     cur.execute("ANALYZE papers")
 
@@ -346,7 +354,7 @@ What this shows:
 
     except Exception as e:
         conn.rollback()
-        print(f"  Error caught: {e.pinfo if hasattr(e, 'pinfo') else str(e).strip()}")
+        print(f"  Error caught: {str(e).strip()}")
         print(f"  Transaction rolled back automatically.")
 
     cur2 = conn.cursor()
