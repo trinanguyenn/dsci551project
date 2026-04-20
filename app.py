@@ -77,15 +77,6 @@ def print_header(title):
     print(DIVIDER)
 
 
-def print_mapping(app_does, db_does, why_it_matters):
-    """Print the 'Application -> Internals -> Why' triple required by the rubric."""
-    print(f"\n  {SUB}")
-    print(f"  APPLICATION:    {app_does}")
-    print(f"  POSTGRES DOES:  {db_does}")
-    print(f"  WHY IT MATTERS: {why_it_matters}")
-    print(f"  {SUB}")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Action 1: Search papers by year  (Bernard - index vs seq scan)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,16 +124,6 @@ def action_search_by_year():
     for line in cur.fetchall():
         print(f"    {line[0]}")
 
-    print_mapping(
-        app_does="User filters the search by a publication year.",
-        db_does=("With idx_papers_year (a B-tree), the planner traverses root "
-                 "-> internal -> leaf pages and fetches only the matching ctids "
-                 "from the heap. Without it, Postgres reads every 8 KB heap "
-                 "page sequentially."),
-        why_it_matters=("Buffer hits drop from O(N pages) to O(log N + matches). "
-                        "This is the storage/indexing payoff in concrete numbers."),
-    )
-
     cur.close()
     conn.close()
 
@@ -153,15 +134,6 @@ def action_search_by_year():
 def action_heap_storage():
     print_header("Action 2: Heap storage -- 8 KB pages and ctid addressing")
     storage_demo.demo_heap_storage()
-    print_mapping(
-        app_does="Operator inspects how paper tuples actually sit on disk.",
-        db_does=("papers is a heap file of 8 KB pages. New rows fill free "
-                 "space wherever it exists, so ctid = (page, tuple) jumps "
-                 "around instead of following paper_id order."),
-        why_it_matters=("Heap order is non-deterministic. That's exactly why "
-                        "we need the planner and B-tree indexes built in the "
-                        "next actions."),
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -170,16 +142,6 @@ def action_heap_storage():
 def action_btree_internals():
     print_header("Action 3: B-tree internals via pgstatindex")
     storage_demo.demo_btree_internals()
-    print_mapping(
-        app_does=("Operator audits the indexes that support search-by-year, "
-                  "search-by-source, and author lookup."),
-        db_does=("Each index is its own 8 KB-page file. pgstatindex reports "
-                 "tree depth, leaf pages, internal pages, and entry count so "
-                 "we can see exactly how many hops a lookup costs."),
-        why_it_matters=("Depth is typically 1-2 on tables this size. That's "
-                        "why even a point lookup against 3,400+ rows feels "
-                        "instantaneous once the right index exists."),
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -188,19 +150,6 @@ def action_btree_internals():
 def action_index_creation_impact():
     print_header("Action 4: Index creation impact -- build cost vs read speedup")
     storage_demo.demo_index_creation_impact()
-    print_mapping(
-        app_does=("Admin temporarily drops idx_authors_name, queries, then "
-                  "rebuilds it -- simulating a migration or tuning change."),
-        db_does=("With no index on authors.name, Postgres falls back to Seq "
-                 "Scan and reads every heap page. CREATE INDEX sorts the keys "
-                 "into a new B-tree; the next query uses Index Scan and jumps "
-                 "straight to the matching ctid."),
-        why_it_matters=("Indexes aren't free. They speed up reads but add "
-                        "build time plus ongoing write overhead (every "
-                        "INSERT/UPDATE must also update the B-tree). "
-                        "Quantifying both sides is the key tradeoff in "
-                        "physical design."),
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -209,18 +158,6 @@ def action_index_creation_impact():
 def action_toast_internals():
     print_header("Action 5: TOAST -- compressing and spilling long abstracts")
     storage_demo.demo_toast()
-    print_mapping(
-        app_does=("Search engine stores full abstracts, some of which are "
-                  "several KB long."),
-        db_does=("TEXT columns use the 'extended' strategy: Postgres first "
-                 "tries to compress the value in place, then pushes it out to "
-                 "the per-table TOAST relation if it still exceeds ~2 KB. "
-                 "The main heap row keeps only a small pointer."),
-        why_it_matters=("Heap pages stay compact, so sequential scans don't "
-                        "waste I/O on big text blobs. This is how a single "
-                        "table can mix short metadata columns and long text "
-                        "without destroying scan performance."),
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -286,22 +223,6 @@ def action_search_by_title():
     for line in cur.fetchall():
         print(f"    {line[0]}")
 
-    print_mapping(
-        app_does=("User types part of a paper title; the app returns matching "
-                  "papers ordered by recency."),
-        db_does=("idx_papers_title is a GIN index over trigrams (3-character "
-                 "substrings) of each title, provided by the pg_trgm "
-                 "extension. A B-tree can't help with '%substr%' patterns "
-                 "because the leading wildcard breaks key ordering, so the "
-                 "planner either uses the trigram index or falls back to a "
-                 "Seq Scan depending on table size."),
-        why_it_matters=("Substring search is the most natural user action in "
-                        "a search engine but the hardest for a traditional "
-                        "B-tree. Trigram indexes are the practical answer, "
-                        "and they cost noticeably more disk space than a "
-                        "B-tree -- another real storage/speed tradeoff."),
-    )
-
     cur.close()
     conn.close()
 
@@ -349,17 +270,6 @@ def action_lookup_author():
     for line in cur.fetchall():
         print(f"    {line[0]}")
 
-    print_mapping(
-        app_does="User looks up every paper by a given author.",
-        db_does=("Postgres parses, rewrites, then the planner enumerates join "
-                 "strategies (nested loop, hash join, merge join) using "
-                 "histograms from ANALYZE. It probes idx_authors_name first, "
-                 "then joins through paper_authors, then fetches papers."),
-        why_it_matters=("The planner -- not the developer -- picks the join "
-                        "algorithm based on table sizes and selectivity. "
-                        "EXPLAIN ANALYZE lets us see and justify that choice."),
-    )
-
     cur.close()
     conn.close()
 
@@ -395,18 +305,6 @@ def action_analytics():
     for line in cur.fetchall():
         print(f"    {line[0]}")
 
-    print_mapping(
-        app_does="Dashboard query: how many IEEE vs JMLR papers per year?",
-        db_does=("For a small table the planner picks Seq Scan + "
-                 "HashAggregate: read every page once, build an in-memory "
-                 "hash table keyed by (year, source), then sort. No index "
-                 "helps because we touch nearly every row anyway."),
-        why_it_matters=("Index scans aren't always faster. The planner uses "
-                        "table statistics to pick sequential scan when a "
-                        "large fraction of the table is needed -- the same "
-                        "principle that makes column stores fast at OLAP."),
-    )
-
     cur.close()
     conn.close()
 
@@ -420,19 +318,6 @@ def action_query_planning_walkthrough():
     query_demo.run_demo()
     pause()
     query_demo.run_join_demo()
-
-    print_mapping(
-        app_does=("Same SELECT and same JOIN, run twice -- once with no "
-                  "supporting index and once after we add it."),
-        db_does=("Postgres re-plans the query each time. With no index it "
-                 "picks Seq Scan or a hash join over full scans. After "
-                 "CREATE INDEX, the planner re-evaluates costs and switches "
-                 "to Index Scan / nested-loop-with-index."),
-        why_it_matters=("This is the most direct demonstration of the "
-                        "internals -> behavior mapping required by the "
-                        "rubric: same SQL, same data, different physical "
-                        "plan, dramatically different runtime."),
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -448,18 +333,6 @@ def action_insert_paper_concurrent():
 
     concurrency_demo.demo_mvcc()
 
-    print_mapping(
-        app_does=("Two users hit the API at once: one is reading 2021 papers, "
-                  "the other is publishing a new one."),
-        db_does=("Postgres assigns each transaction a snapshot via MVCC. The "
-                 "writer creates a NEW tuple version with its own xmin instead "
-                 "of overwriting; the reader keeps seeing tuples visible to its "
-                 "snapshot. No row-level locks are taken on the read path."),
-        why_it_matters=("Reads never block writes and writes never block reads. "
-                        "The cost is dead tuples, which VACUUM later reclaims "
-                        "(see Action 11)."),
-    )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Action 11: Bulk update + VACUUM  (Stephen)
@@ -469,18 +342,6 @@ def action_bulk_update_vacuum():
 
     concurrency_demo.demo_vacuum()
 
-    print_mapping(
-        app_does=("Admin batch-edits 100 paper records (e.g., normalizing "
-                  "trailing whitespace in titles)."),
-        db_does=("Each UPDATE marks the old tuple dead and writes a new one. "
-                 "Live count stays the same; dead count climbs. VACUUM walks "
-                 "the heap, marks dead tuple slots reusable, and updates the "
-                 "free-space map."),
-        why_it_matters=("Without VACUUM, MVCC would silently bloat the table. "
-                        "This is why update-heavy Postgres workloads need an "
-                        "autovacuum policy."),
-    )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Action 12: Isolation levels  (Stephen)
@@ -489,17 +350,6 @@ def action_isolation_levels():
     print_header("Action 12: Isolation levels -- Read Committed vs Repeatable Read")
     concurrency_demo.demo_isolation_levels()
 
-    print_mapping(
-        app_does="Two API requests touch the same paper row at the same time.",
-        db_does=("Under READ COMMITTED, each statement sees the latest committed "
-                 "data, so a re-read inside the same transaction can change. "
-                 "Under REPEATABLE READ, the snapshot is frozen at transaction "
-                 "start; the same SELECT always returns the same value."),
-        why_it_matters=("Picking the right isolation level is an application "
-                        "design decision with real correctness consequences "
-                        "(non-repeatable reads, phantom reads, write skew)."),
-    )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Action 13: Atomic transaction  (Stephen)
@@ -507,18 +357,6 @@ def action_isolation_levels():
 def action_atomic_transaction():
     print_header("Action 13: Transaction atomicity -- all-or-nothing")
     concurrency_demo.demo_atomicity()
-
-    print_mapping(
-        app_does=("Bulk import: insert several papers at once. If any one "
-                  "violates a constraint, none of them should land."),
-        db_does=("Each statement is logged to the WAL before it touches the "
-                 "heap. On the failed insert, Postgres aborts the transaction "
-                 "and uses the WAL records to undo the in-memory effects of "
-                 "the earlier inserts."),
-        why_it_matters=("Atomicity is what makes the database safe to use as "
-                        "the source of truth -- partially-applied edits "
-                        "simply don't exist."),
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
