@@ -20,8 +20,9 @@ Run:
     cd ~/dsci551project
     streamlit run ui/streamlit_app.py
 
-Connection settings come from the same PG* environment variables app.py uses,
-so this works on Windows or WSL with no changes.
+Connection settings honor DATABASE_URL first (Railway / cloud), then fall
+back to the same PG* environment variables app.py uses, then to localhost
+defaults. Works on Windows, WSL, and Railway with no code changes.
 """
 
 import os
@@ -36,19 +37,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, PROJECT_ROOT)
 
-# ─── Database connection (same env-var pattern as app.py) ───────────────────
-DB_CONFIG = {
-    "host":     os.environ.get("PGHOST", "localhost"),
-    "port":     int(os.environ.get("PGPORT", 5432)),
-    "dbname":   os.environ.get("PGDATABASE", "research_papers"),
-    "user":     os.environ.get("PGUSER", "postgres"),
-    "password": os.environ.get("PGPASSWORD", "postgres"),
-}
+# ─── Database connection (DATABASE_URL first, then PG* vars, then defaults) ─
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if DATABASE_URL:
+    DB_KWARGS = {"dsn": DATABASE_URL}
+else:
+    DB_KWARGS = {
+        "host":     os.environ.get("PGHOST", "localhost"),
+        "port":     int(os.environ.get("PGPORT", 5432)),
+        "dbname":   os.environ.get("PGDATABASE", "research_papers"),
+        "user":     os.environ.get("PGUSER", "postgres"),
+        "password": os.environ.get("PGPASSWORD", "postgres"),
+    }
 
 
 def get_conn():
     """Open a fresh connection per request."""
-    return psycopg2.connect(**DB_CONFIG)
+    return psycopg2.connect(**DB_KWARGS)
 
 
 # ─── Page setup ─────────────────────────────────────────────────────────────
